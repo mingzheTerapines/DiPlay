@@ -1,0 +1,62 @@
+name: Build Car-Test APK
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;28.2.13676358
+
+      - name: Provision CarPlay Auth Assets
+        run: |
+          mkdir -p /tmp/runtime-assets/offline-mfi
+          echo "MEECAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQcEJzAlAgEBBCAv4C+7aHy52zIUZMW2bAJVb+f2A+E88wS9ep/vXJi6hg==" | base64 -d > /tmp/runtime-assets/offline-mfi/identity.pk8
+          echo "MIICWwYJKoZIhvcNAQcCoIICTDCCAkgCAQExADALBgkqhkiG9w0BBwGgggIuMIICKjCCAdGgAwIBAgIQJKy7SGRvgHf3RjUjCFtg0jAKBggqhkjOPQQDAjCBiTELMAkGA1UEBhMCVVMxEzARBgNVBAoTCkFwcGxlIEluYy4xJjAkBgNVBAsTHUFwcGxlIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MT0wOwYDVQQDEzRBcHBsZSBBY2Nlc3NvcmllcyBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eSAtIDAwMDAwMDAyMB4XDTE4MDYxMzA4MzI1OVoXDTQ5MTIzMTIzNTk1OVowbTELMAkGA1UEBhMCVVMxEzARBgNVBAoTCkFwcGxlIEluYy4xGjAYBgNVBAsTEUFwcGxlIEFjY2Vzc29yaWVzMS0wKwYDVQQDFCRJUEFfMjRBQ0JCNDg2NDZGODA3N0Y3NDYzNTIzMDg1QjYwRDIwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAT0mPfItJFateYmSe89Z9Bpf4HwogWewlz3ZfUgQkbuxvuvw9vGmuyMlitYkr7QNJM9/J4shFRgN1GesptbVnEpozYwNDAyBgkqhkiG92NkBiQBAf8EIgQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIwCgYIKoZIzj0EAwIDRwAwRAIgaYL03y8Xje/EKdEqhBoRJLB071JCP69YmNOQXVv+qfkCIFngsPKacTAAVavi1E47l28ltIQslTc7ABuQ5c+lt47AoQAxAA==" | base64 -d > /tmp/runtime-assets/offline-mfi/certificate.p7b
+          ls -la /tmp/runtime-assets/offline-mfi
+
+      - name: Generate Local Signing Keystore
+        run: |
+          keytool -genkeypair -v -keystore release.jks -alias diplay -keyalg RSA -keysize 2048 -validity 10000 -storepass 123456 -keypass 123456 -dname "CN=DiPlay"
+
+      - name: Build Standalone Debug and Release APKs
+        env:
+          DIPLAY_AUTH_ASSETS_DIR: /tmp/runtime-assets
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: '123456'
+          ANDROID_KEY_ALIAS: 'diplay'
+          ANDROID_KEY_PASSWORD: '123456'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :mobile:assembleStandaloneDebug :mobile:assembleRelease --stacktrace
+
+      - name: Prepare APK Artifacts
+        run: |
+          mkdir -p output_apks
+          find mobile/build/outputs/apk/ -name "*.apk" -exec cp {} output_apks/ \;
+          ls -lh output_apks/
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiPlay-latest-patch-SongPlusEV
+          path: output_apks/*.apk
